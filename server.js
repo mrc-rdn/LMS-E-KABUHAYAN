@@ -20,30 +20,38 @@ const db = new pg.Client({
     database: process.env.PG_DATABASE,
     password: process.env.PG_PASSWORD,
     port: process.env.PG_PORT,
-})
+});
+
 db.connect();
 
-
 app.use(bodyParser.urlencoded({extended: true}));
-app.use(cors());
 app.use(express.json());
 
+app.use(
+  cors({
+    origin: "http://localhost:5173", // your React app's URL
+    credentials: true,               // allow cookies to be sent
+  })
+);
+
 app.use(session({
-  secret: "IMPORTEXPRESSFROMEXPRESS",
+  secret: process.env.SESSION_SECRET,
   resave: false,
-  saveUninitialized: true,
-  cookie: {maxAge :1000 * 60 * 60 * 24},
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: false, // true if using https
+    sameSite: "lax",
+     maxAge: 1000 * 60 * 60 * 24
+  }
 }));
+
 app.use(passport.initialize());
 app.use(passport.session());
 
 
-app/
-
 app.post("/admin/register", async(req, res)=>{
-    const {username, password, role} = req.body;
-    
-    
+    const {firstName, surname, contactNo, username, password, role } = req.body;   
     try{
         
         const checkResult = await db.query("SELECT * FROM users WHERE username = $1", [username])
@@ -61,32 +69,115 @@ app.post("/admin/register", async(req, res)=>{
                     if(err){
                         res.json("Error hasing password:", err)
                     } else{
-                        const response = await db.query("INSERT INTO users (username, password, role) VALUES ($1, $2, $3)", [username, hash, role])
+                        const usersRes = await db.query("INSERT INTO users (username, password, role) VALUES ($1, $2, $3) RETURNING *", [username, hash, role])
+                
+                        const users = usersRes.rows[0]
+                        const userId = users.id
+                        
+                        const userInfoRes = await db.query("INSERT INTO users_info (id, first_name, surname, contact_no) VALUES ($1, $2, $3, $4) RETURNING *", [userId, firstName, surname, contactNo])
+                        
                         res.json({success: true, message: "Account created"})
                     }
                 })
             }
-            
         }
-    
-
     }catch(err){
         res.json({error: err.message })
     }
 });
 
+//trainer
+//trainer
+//trainer
+// login trainer side
+app.post("/trainer/login", passport.authenticate('local'), (req, res) => {
 
-app.post("/login", passport.authenticate('local'), (req, res) => {
-    res.json({ success: true, user: req.user });
+  if(req.user.role === "TRAINER"){
+    return res.json({ success: true, user: req.user, redirectTo: "/trainer/dashboard" });
+  }else{
+    return res.json({success: false , message: 'role is invalid'})
+  }
 });
 
-app.get("/dashboard", (req, res)=>{
+
+// this will get all the data in your crediatials after you login 
+app.get("/trainer/dashboard", async(req, res)=>{
     if(req.isAuthenticated()){
-        res.json({ authenticated: true})
+        const response = await db.query("SELECT * FROM users_info WHERE id = $1 ", [req.user.id])
+        const user = response.rows[0]
+
+        const Trainee = await db.query("SELECT * FROM users WHERE role = $1", ['TRAINEE'])
+        
+        res.json({ authenticated: true, name: user.first_name, surname: user.surname, contact_no: user.contact_no, totalTrainee: Trainee.rows.length })
     }else{
         res.json({ authenticated: false})
     }
 });
+
+//log out trainer side
+app.post("/trainer/dashboard/logout", (req, res, next) => {
+
+  if (!req.isAuthenticated()) {
+    return res.status(400).json({ message: "No active session found" });
+  }
+
+  req.logout( (err) => {
+    if (err) return next(err);
+
+    req.session.destroy((err) => {
+      if (err) return res.status(500).json({ message: "Failed to destroy session" });
+
+      res.clearCookie("connect.sid");
+      return(res.json({ message: "Successfully logged out", redirectTo: "/" }));
+    });
+  });
+});
+
+app.get("/trainer/dashboard/logout", (req, res) => {
+    req.logout(function(err) {
+        if (err) {
+            return res.json({ success: false, message: err.message });
+        }
+        res.json({ success: true, message: "Logged out successfully" });
+    });
+});
+
+//trainee
+//trainee
+//trainee
+
+
+app.post("/trainee/login",passport.authenticate('local'), (req, res)=>{
+  try {
+    if(req.user.role === "TRAINEE"){
+      res.json({success: true, user: req.user, redirectTo: "/trainee/dashboard"})
+    } else{
+      res.json({success: false, message: "role is invalid"})
+    }
+  } catch (error) {
+    console.log(error)
+  }
+  
+})
+
+app.get("/trainee/dashboard", async(req, res)=>{
+  
+    try{
+      if(req.isAuthenticated()){
+        const response = await db.query("SELECT * FROM users JOIN users_info ON users.id = users_info.id WHERE username = $1",[req.user.username])
+
+        res.json({sucess: true, data: response.rows})
+      }else{
+        res.json({success: false})
+      }
+    }catch(err){
+      res.status(400).json({message: err})
+    }
+    
+    
+
+  
+})
 
 passport.use(new Strategy(async function verify(username, password, cb){
     try {
@@ -116,14 +207,7 @@ passport.use(new Strategy(async function verify(username, password, cb){
       };
 }))
 
-app.get("/logout", (req, res) => {
-    req.logout(function(err) {
-        if (err) {
-            return res.json({ success: false, message: err.message });
-        }
-        res.json({ success: true, message: "Logged out successfully" });
-    });
-});
+
 
 passport.serializeUser((user, cb) =>{
   cb(null, user);
