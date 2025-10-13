@@ -11,7 +11,7 @@ import {Strategy} from "passport-local"
 
 const app = express();
 const port = 3000;
-const saltRounds = 10;
+const saltRounds = parseInt(process.env.SALTED_ROUNDS);
 
 env.config();
 const db = new pg.Client({
@@ -86,32 +86,51 @@ app.post("/admin/register", async(req, res)=>{
     }
 });
 
+
+
 //trainer
 //trainer
 //trainer
+
 // login trainer side
 app.post("/trainer/login", passport.authenticate('local'), (req, res) => {
-
-  if(req.user.role === "TRAINER"){
-    return res.json({ success: true, user: req.user, redirectTo: "/trainer/dashboard" });
-  }else{
-    return res.json({success: false , message: 'role is invalid'})
+   
+  try {
+    if(req.user.role === "TRAINER"){
+      res.json({success: true, redirectTo: "/trainer/dashboard"})
+    } else{
+      res.json({success: false, message: "role is invalid"})
+    }
+  } catch (error) {
+    console.log(error)
   }
 });
 
 
 // this will get all the data in your crediatials after you login 
 app.get("/trainer/dashboard", async(req, res)=>{
-    if(req.isAuthenticated()){
-        const response = await db.query("SELECT * FROM users_info WHERE id = $1 ", [req.user.id])
-        const user = response.rows[0]
-
-        const Trainee = await db.query("SELECT * FROM users WHERE role = $1", ['TRAINEE'])
+    
+    try{
+      if(req.isAuthenticated()){
+        if(req.user.role === "TRAINER"){
+          const response = await db.query("SELECT * FROM users JOIN users_info ON users.id = users_info.id WHERE username = $1",[req.user.username])
+          const TRAINEEcount = await db.query("SELECT * FROM users WHERE role = $1", ['TRAINEE'])
+          const totalTrainee = TRAINEEcount.rows
+          
+          res.json({success: true, user: response.rows[0], totalTrainee: totalTrainee.length})
+        }else{
+          return res.json({success: false , message: 'role is invalid'})
+        }
         
-        res.json({ authenticated: true, name: user.first_name, surname: user.surname, contact_no: user.contact_no, totalTrainee: Trainee.rows.length })
-    }else{
-        res.json({ authenticated: false})
+      }else{
+        res.json({success: false})
+      }
+    }catch(err){
+      res.status(400).json({message: err})
     }
+   
+        
+       
 });
 
 //log out trainer side
@@ -142,15 +161,17 @@ app.get("/trainer/dashboard/logout", (req, res) => {
     });
 });
 
+
+
 //trainee
 //trainee
 //trainee
 
-
+//login for trainee
 app.post("/trainee/login",passport.authenticate('local'), (req, res)=>{
   try {
     if(req.user.role === "TRAINEE"){
-      res.json({success: true, user: req.user, redirectTo: "/trainee/dashboard"})
+      res.json({success: true, redirectTo: "/trainee/dashboard"})
     } else{
       res.json({success: false, message: "role is invalid"})
     }
@@ -160,61 +181,103 @@ app.post("/trainee/login",passport.authenticate('local'), (req, res)=>{
   
 })
 
+
+// //getting a certain data of users
 app.get("/trainee/dashboard", async(req, res)=>{
   
     try{
       if(req.isAuthenticated()){
-        const response = await db.query("SELECT * FROM users JOIN users_info ON users.id = users_info.id WHERE username = $1",[req.user.username])
+        if(req.user.role === "TRAINEE"){
+          const response = await db.query("SELECT * FROM users JOIN users_info ON users.id = users_info.id WHERE username = $1",[req.user.username])
 
-        res.json({sucess: true, data: response.rows})
+          res.json({success: true, user: req.user, data: response.rows})
+        }else{
+          return res.json({success: false , message: 'role is invalid'})
+        }
+        
       }else{
         res.json({success: false})
       }
     }catch(err){
       res.status(400).json({message: err})
     }
-    
-    
-
-  
 })
+
+app.post("/trainee/dashboard/logout", (req, res, next) => {
+
+  if (!req.isAuthenticated()) {
+    return res.status(400).json({ message: "No active session found" });
+  }
+
+  req.logout( (err) => {
+    if (err) return next(err);
+
+    req.session.destroy((err) => {
+      if (err) return res.status(500).json({ message: "Failed to destroy session" });
+
+      res.clearCookie("connect.sid");
+      return(res.json({ message: "Successfully logged out", redirectTo: "/" }));
+    });
+  });
+});
+
+app.get("/trainee/dashboard/logout", (req, res) => {
+    req.logout(function(err) {
+        if (err) {
+            return res.json({ success: false, message: err.message });
+        }
+        res.json({ success: true, message: "Logged out successfully" });
+    });
+});
+
+
+
+//ADMIN
+//ADMIN
+//ADMIN
+
+
+
 
 passport.use(new Strategy(async function verify(username, password, cb){
     try {
-        const result = await db.query("SELECT * FROM users WHERE username = $1", [
-          username,
-        ]);
-        if (result.rows.length > 0) {
-          const user = result.rows[0];
-          const storedHashPassword = user.password;
+      const result = await db.query("SELECT * FROM users WHERE username = $1", [
+        username,
+      ]);
+      if (result.rows.length > 0) {
+        const user = result.rows[0];
+        
     
-          bcrypt.compare(password, storedHashPassword, (err, result)=> {
-            if(err){
-              console.log("Error comparing passwords:", err);
-            }else {
-              if(result){
-                return cb(null, user)
-              }else{
-                return cb(null, false)
-              }
-            };
-          });
-        } else {
-          return cb("User not found");
-        };
-      } catch (err) {
-        return cb(err);
+        bcrypt.compare(password, user.password, (err, result)=> {
+          if(err){
+            console.log("Error comparing passwords:", err);
+          }else {
+            if(result){
+              return cb(null, user)
+            }else{
+              return cb(null, false, {message: "Incorrect Password"}) 
+              
+            }
+          };
+        });
+      } else {
+        return cb("User not found");
       };
+    }catch (err) {
+      return cb("error handling", err);
+    };
 }))
 
 
 
 passport.serializeUser((user, cb) =>{
   cb(null, user);
+  
 });
 
 passport.deserializeUser((user, cb) =>{
-  cb(null, user);
+  cb(null, user)
+  
 });
 
 app.listen(port, ()=>{
