@@ -115,22 +115,28 @@ app.post("/admin/register", async(req, res)=>{
 
 //admin
 //admin
-//admin
+//admin 
 
 
-app.post("/trainer/login", passport.authenticate('local'), (req, res) => {
-   
+// admin trainer login 
+
+app.post("/trainer/login", passport.authenticate("local"), (req, res) => {
   try {
-    if(req.user.role === "SUPERADMIN"){
-      res.json({success: true, redirectTo: "/admin/dashboard"})
-    } else{
-      res.json({success: false, message: "role is invalid"})
+    if (req.user.role === "SUPERADMIN") {
+      res.json({ success: true, redirectTo: "/admin/dashboard" });
+    } else if (req.user.role === "TRAINER") {
+      res.json({ success: true, redirectTo: "/trainer/dashboard" });
+    } else {
+      res.json({ success: false, message: "role is invalid" });
     }
   } catch (error) {
-    console.log(error)
-    console.log(req.user)
+    console.error(error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
+
+
 
 app.get("/admin/dashboard", async(req, res)=>{
   
@@ -150,9 +156,9 @@ app.get("/admin/dashboard", async(req, res)=>{
     }catch(err){
       res.status(400).json({message: err})
     }
-})
+});
 
-//create modules
+//create course
 app.post("/admin/course/createcourse", async(req, res)=>{
   const {title, description } = req.body;
  try {
@@ -179,7 +185,26 @@ app.post("/admin/course/createcourse", async(req, res)=>{
  }
 });
 
-// tp upload videos
+//create chapter
+
+//fethcing data for courses tro appear
+app.get("/admin/course", async(req, res)=>{
+
+  try {
+    if(req.isAuthenticated()){
+      const query = `SELECT * FROM courses `
+      const response = await db.query(query)  
+      res.status(200).json({data: response.rows})
+    }else{
+      res.status(401).json({success: false, messsage: 'unauthorized access' })
+    }
+    
+  } catch (error) {
+    res.status(400).json({success: error})
+  }
+})
+
+// to upload videos
 
 app.post("/modules/:moduleid/upload", uploadVideo.single("video"), async (req, res) => {
   try {
@@ -226,19 +251,6 @@ app.post("/modules/:moduleid/upload", uploadVideo.single("video"), async (req, r
 //trainer
 
 // login trainer side
-app.post("/trainer/login", passport.authenticate('local'), (req, res) => {
-   
-  try {
-    if(req.user.role === "TRAINER"){
-      res.json({success: true, redirectTo: "/trainer/dashboard"})
-    } else{
-      res.json({success: false, message: "role is invalid"})
-    }
-  } catch (error) {
-    console.log(error)
-    console.log(req.user)
-  }
-});
 
 
 // this will get all the data in your crediatials after you login 
@@ -251,7 +263,7 @@ app.get("/trainer/dashboard", async(req, res)=>{
           const TRAINEEcount = await db.query("SELECT * FROM users WHERE role = $1", ['TRAINEE'])
           const totalTrainee = TRAINEEcount.rows
           
-          res.json({success: true, user: response.rows[0], totalTrainee: totalTrainee.length})
+          res.json({success: true, user: response.rows[0], totalTrainee: totalTrainee.length ,})
         }else{
           return res.json({success: false , message: 'role is invalid'})
         }
@@ -266,7 +278,7 @@ app.get("/trainer/dashboard", async(req, res)=>{
         
        
 });
-
+//
 //log out trainer side
 app.post("/trainer/dashboard/logout", (req, res, next) => {
 
