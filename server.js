@@ -8,6 +8,10 @@ import session from "express-session";
 import passport from "passport";
 import {Strategy} from "passport-local"
 
+import { v2 as cloudinary } from "cloudinary";
+import multer from "multer";
+import { CloudinaryStorage } from "multer-storage-cloudinary"
+
 
 const app = express();
 const port = 3000;
@@ -23,6 +27,26 @@ const db = new pg.Client({
 });
 
 db.connect();
+
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+
+const videoStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "elearning_videos", // folder name sa Cloudinary
+    resource_type: "video", // importante ito para sa mp4/mov files
+    allowed_formats: ["mp4", "mov", "avi", "mkv"],
+    public_id: (req, file) => `video_${Date.now()}_${file.originalname}`,
+  },
+});
+
+const uploadVideo = multer({ storage: videoStorage });
 
 app.use(bodyParser.urlencoded({extended: true}));
 app.use(express.json());
@@ -48,6 +72,8 @@ app.use(session({
 
 app.use(passport.initialize());
 app.use(passport.session());
+
+
 
 
 app.post("/admin/register", async(req, res)=>{
@@ -87,6 +113,113 @@ app.post("/admin/register", async(req, res)=>{
 });
 
 
+//admin
+//admin
+//admin
+
+
+app.post("/trainer/login", passport.authenticate('local'), (req, res) => {
+   
+  try {
+    if(req.user.role === "SUPERADMIN"){
+      res.json({success: true, redirectTo: "/admin/dashboard"})
+    } else{
+      res.json({success: false, message: "role is invalid"})
+    }
+  } catch (error) {
+    console.log(error)
+    console.log(req.user)
+  }
+});
+
+app.get("/admin/dashboard", async(req, res)=>{
+  
+    try{
+      if(req.isAuthenticated()){
+        if(req.user.role === "SUPERADMIN"){
+          const response = await db.query("SELECT * FROM users JOIN users_info ON users.id = users_info.id WHERE username = $1",[req.user.username])
+
+          res.json({success: true, user: req.user, data: response.rows})
+        }else{
+          return res.json({success: false , message: 'role is invalid'})
+        }
+        
+      }else{
+        res.json({success: false})
+      }
+    }catch(err){
+      res.status(400).json({message: err})
+    }
+})
+
+//create modules
+app.post("/admin/course/createcourse", async(req, res)=>{
+  const {title, description } = req.body;
+ try {
+  if(req.isAuthenticated()){
+    if(req.user.role === "SUPERADMIN"){
+      const date = new Date();
+      const time = date.toLocaleTimeString();
+    
+      const response = await db.query(
+        "INSERT INTO courses (title, description, created_by, created_at ) VALUES($1, $2, $3, $4) RETURNING * ", 
+        [title, description,req.user.id , time])
+
+      res.status(200).json({succes: true, data: response.rows })
+    }else{
+      res.status(401).json({succes: false})
+    }
+    
+  }else{
+    res.status(401).json({succes: false})
+  }
+  
+ } catch (error) {
+  res.status(400).json({ message: `unable to insert you data:  ${error}`, })
+ }
+});
+
+// tp upload videos
+
+app.post("/modules/:moduleid/upload", uploadVideo.single("video"), async (req, res) => {
+  try {
+    
+      const moduleId = req.params
+    if (!req.file) {
+      console.log("❌ No file uploaded!");
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    console.log("✅ File received:", req.file.originalname);
+
+    // Upload to Cloudinary
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      resource_type: "video",
+      folder: "elearning_videos",
+    });
+
+    console.log("✅ Cloudinary upload success:", result.secure_url);
+
+    // Save in DB
+    const query = `
+      INSERT INTO module_items (module_id, title, item_type, source_url, order_index)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *;
+    `;
+    const values = [moduleId, req.file.originalname, "VIDEO", result.secure_url, 1];
+    const inserted = await db.query(query, values);
+
+    console.log("✅ Database insert success:", inserted.rows[0]);
+    res.json({ success: true, data: inserted.rows[0] });
+
+  } catch (err) {
+    console.error("🔥 Upload error:", err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+
+
 
 //trainer
 //trainer
@@ -103,6 +236,7 @@ app.post("/trainer/login", passport.authenticate('local'), (req, res) => {
     }
   } catch (error) {
     console.log(error)
+    console.log(req.user)
   }
 });
 
