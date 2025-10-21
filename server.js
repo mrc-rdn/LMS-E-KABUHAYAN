@@ -1,9 +1,8 @@
 import express from "express";
 import bodyParser from "body-parser";
-import pg from "pg"
-import env from "dotenv"
 import cors from "cors"
 import bcrypt from "bcrypt"
+import env from 'dotenv'
 import session from "express-session";
 import passport from "passport";
 import {Strategy} from "passport-local"
@@ -12,19 +11,15 @@ import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary"
 
+import db from './db/connection.js'
+
 
 const app = express();
 const port = 3000;
 const saltRounds = parseInt(process.env.SALTED_ROUNDS);
 
 env.config();
-const db = new pg.Client({
-    user: process.env.PG_USER,
-    host: process.env.PG_HOST,
-    database: process.env.PG_DATABASE,
-    password: process.env.PG_PASSWORD,
-    port: process.env.PG_PORT,
-});
+
 
 db.connect();
 
@@ -76,10 +71,15 @@ app.use(passport.session());
 
 
 
-app.post("/admin/register", async(req, res)=>{
+app.post("/admin/registeraccount", async(req, res)=>{
     const {firstName, surname, contactNo, username, password, role } = req.body;   
     try{
-        
+        if(!req.isAuthenticated()){
+          res.status(401).json({success: false, message: 'unauthorized access'})
+        }
+        if(req.user.role !== "SUPERADMIN"){
+          res.status(401).json({success: false, message: 'invalid role'})
+        }
         const checkResult = await db.query("SELECT * FROM users WHERE username = $1", [username])
 
         if(checkResult.rows.length > 0){
@@ -135,26 +135,44 @@ app.post("/trainer/login", passport.authenticate("local"), (req, res) => {
   }
 });
 
+app.get("/admin/protectedroute", async( req, res)=>{
+  try {
+    if(!req.isAuthenticated()){
+      res.status(401).json({success: false, message: 'Unauthorized'})
+    }
+    if(req.user.role !== "SUPERADMIN"){
+      res.status(403).json({success: false , message: 'role is invalid'})
+    }
 
+    res.status(200).json({success: true, message: "success login"})
+  } catch (error) {
+    res.status(400).json({success: false, message: "Server error"})
+  }
+})
+ 
 
 
 app.get("/admin/dashboard", async(req, res)=>{
-  
     try{
-      if(req.isAuthenticated()){
-        if(req.user.role === "SUPERADMIN"){
-          const response = await db.query("SELECT * FROM users JOIN users_info ON users.id = users_info.id WHERE username = $1",[req.user.username])
-
-          res.json({success: true, user: req.user, data: response.rows})
-        }else{
-          return res.json({success: false , message: 'role is invalid'})
-        }
-        
-      }else{
-        res.json({success: false})
+      if(!req.isAuthenticated()){
+        return res.status(401).json({success: false, message: 'Unauthorized'})
       }
+      if(req.user.role !== "SUPERADMIN"){
+        return res.status(403).json({success: false , message: 'Forbidden'})
+      }
+
+      const trainee = await db.query("SELECT * FROM users WHERE role = 'TRAINEE'");
+      const trainer = await db.query("SELECT * FROM users WHERE role = 'TRAINER' ")
+      const coursesResponse = await db.query("SELECT * FROM courses")
+      res.status(200).json({
+        success: true, 
+        traineeCount: trainee.rows.length, 
+        trainerCount:trainer.rows.length, 
+        coursesCount: coursesResponse.rows.length 
+      });
+
     }catch(err){
-      res.status(400).json({message: err})
+      res.status(500).json({message: err})
     }
 });
 
@@ -162,87 +180,167 @@ app.get("/admin/dashboard", async(req, res)=>{
 app.post("/admin/course/createcourse", async(req, res)=>{
   const {title, description } = req.body;
  try {
-  if(req.isAuthenticated()){
-    if(req.user.role === "SUPERADMIN"){
-      const date = new Date();
-      const time = date.toLocaleTimeString();
-    
-      const response = await db.query(
-        "INSERT INTO courses (title, description, created_by, created_at ) VALUES($1, $2, $3, $4) RETURNING * ", 
-        [title, description,req.user.id , time])
-
-      res.status(200).json({succes: true, data: response.rows })
-    }else{
-      res.status(401).json({succes: false})
-    }
-    
-  }else{
-    res.status(401).json({succes: false})
+  if(!req.isAuthenticated()){
+    res.status(401).json({succes: false, message: "Unauthorized"})
   }
-  
+  if(req.user.role !== "SUPERADMIN"){
+      res.status(403).json({succes: false, messsage:"invalid role"})
+  }
+    
+  const response = await db.query(
+    "INSERT INTO courses (title, description, created_by ) VALUES($1, $2, $3) RETURNING * ", 
+    [title, description,req.user.id ])
+
+  res.status(200).json({succes: true, data: response.rows })
  } catch (error) {
   res.status(400).json({ message: `unable to insert you data:  ${error}`, })
  }
 });
 
-//create chapter
+//delete course
 
-//fethcing data for courses tro appear
+app.delete("/admin/coursedelete", async(req, res)=>{
+  try {
+    
+  } catch (error) {
+    
+  }
+})
+
+//create chapter
+app.post("/admin/course/addchapter", async(req, res)=>{
+  const {course_id, chapter_name, description, chapter_no} = req.body
+  try {
+    if(!req.isAuthenticated()){
+      res.status(401).json({success: false, message: 'unauthorized access'})
+    }
+    if(req.user.role !== "SUPERADMIN"){
+      res.status(403).json({success: false, message: 'invalid role'})
+    }
+
+    // const courseIdInt =parseInt(course_id);
+    // const orderIndex = parseInt(chapter_no)
+    const date = new Date();
+    const time = date.toLocaleTimeString();
+    const response = await db.query(
+      "INSERT INTO chapters (course_id, title, description, order_index, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING * ",
+      [course_id, chapter_name, description, chapter_no, time ]
+    )
+    res.status(200).json({success: true, data: response.rows[0]})
+     
+      
+    } catch (error) {
+    res.status(400).json({ message: `unable to insert you data:  ${error}`, })
+  }
+});
+
+//fetching data for chapter to appear according to your course
+app.post("/admin/course/chapter", async(req, res)=>{
+  const {course_Id} = req.body
+  try {
+    if(!req.isAuthenticated()){
+      res.status(401).json({success: false, message: 'unauthorized access'})
+    }
+    if(req.user.role !== "SUPERADMIN"){
+      res.status(401).json({success: false, message: 'invalid role'})
+    }
+    const query = 'SELECT * FROM courses JOIN chapters ON courses.id = chapters.course_id WHERE courses.id = $1'
+    const response = await db.query(query,[course_Id]);
+    res.status(200).json({success: true, data: response.rows, chapterLength: response.rows.length})
+
+  } catch (error) {
+    res.status(400).json({ message: `unable to insert you data:  ${error}`, })
+  }
+}) 
+
+//fethcing data for courses to appear
 app.get("/admin/course", async(req, res)=>{
 
   try {
-    if(req.isAuthenticated()){
+    if(!req.isAuthenticated()){
+      res.status(401).json({success: false, messsage: 'unauthorized access' })
+    }
+    if(req.user.role !== "SUPERADMIN"){
+      res.status(401).json({success: false, message: 'invalid role'})
+    }
+
       const query = `SELECT * FROM courses `
       const response = await db.query(query)  
       res.status(200).json({data: response.rows})
-    }else{
-      res.status(401).json({success: false, messsage: 'unauthorized access' })
-    }
     
   } catch (error) {
     res.status(400).json({success: error})
   }
-})
-
-// to upload videos
-
-app.post("/modules/:moduleid/upload", uploadVideo.single("video"), async (req, res) => {
-  try {
-    
-      const moduleId = req.params
-    if (!req.file) {
-      console.log("❌ No file uploaded!");
-      return res.status(400).json({ error: "No file uploaded" });
-    }
-
-    console.log("✅ File received:", req.file.originalname);
-
-    // Upload to Cloudinary
-    const result = await cloudinary.uploader.upload(req.file.path, {
-      resource_type: "video",
-      folder: "elearning_videos",
-    });
-
-    console.log("✅ Cloudinary upload success:", result.secure_url);
-
-    // Save in DB
-    const query = `
-      INSERT INTO module_items (module_id, title, item_type, source_url, order_index)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING *;
-    `;
-    const values = [moduleId, req.file.originalname, "VIDEO", result.secure_url, 1];
-    const inserted = await db.query(query, values);
-
-    console.log("✅ Database insert success:", inserted.rows[0]);
-    res.json({ success: true, data: inserted.rows[0] });
-
-  } catch (err) {
-    console.error("🔥 Upload error:", err);
-    res.status(400).json({ error: err.message });
-  }
 });
 
+
+
+// to upload videos
+app.post("/admin/chapter/upload", uploadVideo.single("video"), async (req, res) => {
+  //const activityNumber = req.params;
+ try {
+    if(!req.isAuthenticated()){
+      res.status(401).json({success: false, messsage: 'unauthorized access' })
+    }
+    if(req.user.role !== "SUPERADMIN"){
+      res.status(401).json({success: false, message: 'invalid role'})
+    }
+    if(!req.file){
+      res.status(400).json({succes: false, message: "No file uploaded"})
+    }
+
+    const query = 'INSERT INTO chapter_items (activity_id, title, item_type, source_url, order_index, required, course_id)'
+    const values = [activityNumber, req.body.title, 'VIDEO', req.file.path, 1, true, req.body.courseId  ]
+    await db.query(query, values)
+    res.json({success: true, message: "File received successfully", })
+ } catch (error) {
+    conosle.log(error)
+    res.json({meesgae:'bad'})
+ }
+});
+
+app.delete("/admin/deletevideo", async(req, res)=>{
+  try {
+    
+
+    const result = await cloudinary.uploader.destroy(
+    'elearning_videos/video_1760977544634_29c492c5-d1f5-4e88-bd1a-79b3a289b323.mp4',
+  { resource_type: "video" } // ← important kapag video
+);
+    console.log(result)
+  } catch (error) {
+    console.log(error)
+  }
+})
+
+
+
+// app.get("/admin/:chapter", async(req, res)=>{
+//   const chapter_No = req.params 
+//   try {
+//     const query = `SELECT * FROM courses `
+//   } catch (error) {
+    
+//   }
+// })
+
+app.post("/admin/dashboard/logout", (req, res, next) => {
+
+  if (!req.isAuthenticated()) {
+    return res.status(400).json({ message: "No active session found" });
+  }
+
+  req.logout( (err) => {
+    if (err) return next(err);
+
+    req.session.destroy((err) => {
+      if (err) return res.status(500).json({ message: "Failed to destroy session" });
+
+      res.clearCookie("connect.sid");
+      return(res.json({ message: "Successfully logged out", redirectTo: "/" }));
+    });
+  });
+});
 
 
 
@@ -260,7 +358,8 @@ app.get("/trainer/dashboard", async(req, res)=>{
       if(req.isAuthenticated()){
         if(req.user.role === "TRAINER"){
           const response = await db.query("SELECT * FROM users JOIN users_info ON users.id = users_info.id WHERE username = $1",[req.user.username])
-          const TRAINEEcount = await db.query("SELECT * FROM users WHERE role = $1", ['TRAINEE'])
+          const TRAINEEcount = await db.query("SELECT * FROM users WHERE role = $1", ['TRAINEE']);
+          
           const totalTrainee = TRAINEEcount.rows
           
           res.json({success: true, user: response.rows[0], totalTrainee: totalTrainee.length ,})
@@ -298,14 +397,6 @@ app.post("/trainer/dashboard/logout", (req, res, next) => {
   });
 });
 
-app.get("/trainer/dashboard/logout", (req, res) => {
-    req.logout(function(err) {
-        if (err) {
-            return res.json({ success: false, message: err.message });
-        }
-        res.json({ success: true, message: "Logged out successfully" });
-    });
-});
 
 
 
@@ -334,9 +425,9 @@ app.get("/trainee/dashboard", async(req, res)=>{
     try{
       if(req.isAuthenticated()){
         if(req.user.role === "TRAINEE"){
-          const response = await db.query("SELECT * FROM users JOIN users_info ON users.id = users_info.id WHERE username = $1",[req.user.username])
+          const response = await db.query("SELECT role, username, users.id, first_name, surname FROM users JOIN users_info ON users.id = users_info.id WHERE username = $1",[req.user.username])
 
-          res.json({success: true, user: req.user, data: response.rows})
+          res.json({success: true, data: response.rows[0]})
         }else{
           return res.json({success: false , message: 'role is invalid'})
         }
@@ -367,20 +458,10 @@ app.post("/trainee/dashboard/logout", (req, res, next) => {
   });
 });
 
-app.get("/trainee/dashboard/logout", (req, res) => {
-    req.logout(function(err) {
-        if (err) {
-            return res.json({ success: false, message: err.message });
-        }
-        res.json({ success: true, message: "Logged out successfully" });
-    });
-});
 
 
 
-//ADMIN
-//ADMIN
-//ADMIN
+
 
 
 
