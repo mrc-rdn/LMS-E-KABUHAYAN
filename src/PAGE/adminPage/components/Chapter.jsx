@@ -6,8 +6,8 @@ export default function Chapter(props) {
     <div className=''>
         
             <div 
-            className='w-90 h-15 bg-green-500 border-gray-200 border-2 flex items-center'
-            onClick={()=>{}}>
+              className='w-90 h-15 bg-green-500 border-gray-200 border-2 flex items-center'
+              onClick={()=>{props.handleOpenChapter(props.chapterNo)}}>
                 <p className='text-2xl m-2 '>{props.title}: </p> <p>{props.description}</p>
         
             </div>

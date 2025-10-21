@@ -1,48 +1,63 @@
-import React, {useState} from 'react'
-import axios, { formToJSON } from 'axios'
+import React, { useState } from "react";
+import axios from "axios";
 
-export default function VideoUploadTest(props) {
+export default function VideoUpload(props) {
   const [video, setVideo] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [title, setTitle] = useState("");
 
-  async function uploadVideo(e){
+  async function uploadVideo(e) {
     e.preventDefault();
+
+    if (!video) {
+      alert("Please select a video file first.");
+      return;
+    }
+
     const formData = new FormData();
     formData.append("video", video);
     formData.append("title", title);
-    formData.append("courseId", props.course_id)
+    formData.append("course_id", props.course_id);
+    formData.append("order_index", props.chapter_no);
 
     try {
-      const response = await axios.post('http://localhost:3000/admin/chapter/upload', formData ,
-        {withCredentials: true, headers: {"Content-Type": "multipart/form-data"}
-      })
-      console.log(response)
-    } catch (error) {
-      console.log(error)
-    }
+      setUploading(true);
 
+      const response = await axios.post(
+        "http://localhost:3000/admin/chapter/upload",
+        formData,
+        { withCredentials: true } 
+      );
+
+      console.log("✅ Upload success:", response.data);
+    } catch (error) {
+      console.error("❌ Upload failed:", error);
+    } finally {
+      setUploading(false);
+    }
   }
-  console.log(props.course_id)
+
   return (
     <div>
-      <div>
-        <form onSubmit={uploadVideo}>
-          <input
-            type="text"
-            onChange={(e)=>{setTitle(e.target.value)}} 
-            required/>
+      <form onSubmit={uploadVideo}>
+        <input
+          type="text"
+          placeholder="Video Title"
+          onChange={(e) => setTitle(e.target.value)}
+          required
+        />
 
-          <input 
-            type="file"
-            acccept="video/*"
-            onChange={(e)=>{setVideo(e.target.files[0]) }} />
+        <input
+          type="file"
+          accept="video/*"
+          onChange={(e) => setVideo(e.target.files[0])}
+          required
+        />
 
-          <button type='submit'>upload</button>
-
-        </form>
-          
-      </div>
+        <button type="submit" disabled={uploading}>
+          {uploading ? "Uploading..." : "Upload"}
+        </button>
+      </form>
     </div>
-  )
+  );
 }
